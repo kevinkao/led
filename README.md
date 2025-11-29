@@ -37,7 +37,7 @@ app/
 
 ### 1. Process Outage Event
 
-Process and aggregate outage event data. The system automatically groups events that occur within a 5-minute window.
+Process and aggregate outage event data. Events are automatically grouped if they occur within 60 minutes of the previous event.
 
 **Endpoint:** `POST /api/v1/data-process`
 
@@ -56,11 +56,16 @@ Process and aggregate outage event data. The system automatically groups events 
   "success": true,
   "message": "Event processed successfully",
   "data": {
-    "group_id": 123,
-    "is_new_group": true
+    "success": true,
+    "action": "created_new_group",
+    "group_id": "123"
   }
 }
 ```
+
+**Response Fields:**
+- `action`: One of `created_new_group`, `added_to_cached_group`, or `added_to_db_group`
+- `group_id`: The ID of the outage group (string)
 
 **Example Request:**
 
@@ -72,29 +77,6 @@ curl -X POST http://localhost:3000/api/v1/data-process \
     "event_type": "panel_outage",
     "timestamp": 1735603200
   }'
-```
-
-**Error Responses:**
-
-```json
-{
-  "success": false,
-  "error": "controller_id is required"
-}
-```
-
-```json
-{
-  "success": false,
-  "error": "event_type must be one of: panel_outage, temperature_outage, led_outage"
-}
-```
-
-```json
-{
-  "success": false,
-  "error": "timestamp must be a valid unix timestamp (positive integer)"
-}
 ```
 
 ### 2. Query Outage Groups
@@ -152,29 +134,6 @@ curl -X GET "http://localhost:3000/api/v1/outages/groups?outage_type=panel_outag
 With controller filter and pagination:
 ```bash
 curl -X GET "http://localhost:3000/api/v1/outages/groups?outage_type=panel_outage&controller_id=CTRL001&start_time=1735603200&end_time=1735689600&offset=20&limit=10"
-```
-
-**Error Responses:**
-
-```json
-{
-  "success": false,
-  "error": "outage_type is required"
-}
-```
-
-```json
-{
-  "success": false,
-  "error": "start_time cannot be greater than end_time"
-}
-```
-
-```json
-{
-  "success": false,
-  "error": "limit must be a positive integer"
-}
 ```
 
 ## Prerequisites

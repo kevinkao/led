@@ -2,11 +2,17 @@ const dataProcessService = require('../../service/dataProcess.service');
 const outageGroupRepo = require('../../repository/outageGroup.repository');
 const outageItemRepo = require('../../repository/outageItem.repository');
 const { getRedisClient } = require('../../lib/redis');
+const { prisma } = require('../../lib/db');
 
 // Mock dependencies
 jest.mock('../../repository/outageGroup.repository');
 jest.mock('../../repository/outageItem.repository');
 jest.mock('../../lib/redis');
+jest.mock('../../lib/db', () => ({
+  prisma: {
+    $transaction: jest.fn()
+  }
+}));
 
 describe('DataProcessService', () => {
   let mockRedisClient;
@@ -43,8 +49,14 @@ describe('DataProcessService', () => {
 
         mockRedisClient.get.mockResolvedValue(null); // No cache
         outageGroupRepo.findByControllerAndEventType.mockResolvedValue(null); // No DB match
-        outageGroupRepo.create.mockResolvedValue(mockNewGroup);
-        outageItemRepo.create.mockResolvedValue({
+
+        // Mock transaction
+        prisma.$transaction.mockImplementation(async (callback) => {
+          return await callback(prisma);
+        });
+
+        outageGroupRepo.createWithTx.mockResolvedValue(mockNewGroup);
+        outageItemRepo.createWithTx.mockResolvedValue({
           id: 1,
           group_id: 1,
           occurrence_time: new Date(baseEventData.timestamp * 1000)
@@ -59,16 +71,16 @@ describe('DataProcessService', () => {
           action: 'created_new_group',
           group_id: 1
         });
-        expect(outageGroupRepo.create).toHaveBeenCalledWith({
+        expect(outageGroupRepo.createWithTx).toHaveBeenCalledWith({
           eventType: baseEventData.event_type,
           controllerId: baseEventData.controller_id,
           startTime: baseEventData.timestamp,
           endTime: baseEventData.timestamp
-        });
-        expect(outageItemRepo.create).toHaveBeenCalledWith({
+        }, prisma);
+        expect(outageItemRepo.createWithTx).toHaveBeenCalledWith({
           groupId: 1,
           occurrenceTime: baseEventData.timestamp
-        });
+        }, prisma);
         expect(mockRedisClient.setEx).toHaveBeenCalled();
       });
     });
@@ -91,13 +103,19 @@ describe('DataProcessService', () => {
         };
 
         mockRedisClient.get.mockResolvedValue(JSON.stringify(cachedGroup));
-        outageItemRepo.create.mockResolvedValue({
+
+        // Mock transaction
+        prisma.$transaction.mockImplementation(async (callback) => {
+          return await callback(prisma);
+        });
+
+        outageItemRepo.createWithTx.mockResolvedValue({
           id: 2,
           group_id: 1,
           occurrence_time: new Date(baseEventData.timestamp * 1000)
         });
-        outageItemRepo.findLastItemByGroupId.mockResolvedValue(mockLastItem);
-        outageGroupRepo.updateEndTime.mockResolvedValue({
+        outageItemRepo.findLastItemByGroupIdWithTx.mockResolvedValue(mockLastItem);
+        outageGroupRepo.updateEndTimeWithTx.mockResolvedValue({
           id: 1,
           end_time: new Date(baseEventData.timestamp * 1000)
         });
@@ -111,11 +129,11 @@ describe('DataProcessService', () => {
           action: 'added_to_cached_group',
           group_id: 1
         });
-        expect(outageItemRepo.create).toHaveBeenCalledWith({
+        expect(outageItemRepo.createWithTx).toHaveBeenCalledWith({
           groupId: 1,
           occurrenceTime: baseEventData.timestamp
-        });
-        expect(outageGroupRepo.updateEndTime).toHaveBeenCalledWith(1, baseEventData.timestamp);
+        }, prisma);
+        expect(outageGroupRepo.updateEndTimeWithTx).toHaveBeenCalledWith(1, baseEventData.timestamp, prisma);
       });
     });
 
@@ -138,13 +156,19 @@ describe('DataProcessService', () => {
 
         mockRedisClient.get.mockResolvedValue(null); // No cache
         outageGroupRepo.findByControllerAndEventType.mockResolvedValue(dbGroup);
-        outageItemRepo.create.mockResolvedValue({
+
+        // Mock transaction
+        prisma.$transaction.mockImplementation(async (callback) => {
+          return await callback(prisma);
+        });
+
+        outageItemRepo.createWithTx.mockResolvedValue({
           id: 3,
           group_id: 2,
           occurrence_time: new Date(baseEventData.timestamp * 1000)
         });
-        outageItemRepo.findLastItemByGroupId.mockResolvedValue(mockLastItem);
-        outageGroupRepo.updateEndTime.mockResolvedValue({
+        outageItemRepo.findLastItemByGroupIdWithTx.mockResolvedValue(mockLastItem);
+        outageGroupRepo.updateEndTimeWithTx.mockResolvedValue({
           id: 2,
           end_time: new Date(baseEventData.timestamp * 1000)
         });
@@ -187,8 +211,14 @@ describe('DataProcessService', () => {
 
         mockRedisClient.get.mockResolvedValue(JSON.stringify(cachedGroup));
         outageGroupRepo.findByControllerAndEventType.mockResolvedValue(null); // No DB match
-        outageGroupRepo.create.mockResolvedValue(mockNewGroup);
-        outageItemRepo.create.mockResolvedValue({
+
+        // Mock transaction
+        prisma.$transaction.mockImplementation(async (callback) => {
+          return await callback(prisma);
+        });
+
+        outageGroupRepo.createWithTx.mockResolvedValue(mockNewGroup);
+        outageItemRepo.createWithTx.mockResolvedValue({
           id: 4,
           group_id: 3,
           occurrence_time: new Date(baseEventData.timestamp * 1000)
@@ -203,7 +233,7 @@ describe('DataProcessService', () => {
           action: 'created_new_group',
           group_id: 3
         });
-        expect(outageGroupRepo.create).toHaveBeenCalled();
+        expect(outageGroupRepo.createWithTx).toHaveBeenCalled();
       });
     });
   });
@@ -287,7 +317,7 @@ describe('DataProcessService', () => {
     it('should set group to Redis cache', async () => {
       // Arrange
       const mockGroup = {
-        id: 1,
+        id: "1",
         event_type: 'led_outage',
         controller_id: 'AOT1D-25090001'
       };
@@ -298,9 +328,252 @@ describe('DataProcessService', () => {
       // Assert
       expect(mockRedisClient.setEx).toHaveBeenCalledWith(
         'outage_group:AOT1D-25090001:led_outage',
-        7200,
+        3600,
         JSON.stringify(mockGroup)
       );
+    });
+  });
+
+  describe('Transaction support - createNewGroup', () => {
+    const baseData = {
+      controllerId: 'AOT1D-25090001',
+      eventType: 'led_outage',
+      timestamp: 1756665796
+    };
+
+    it('should rollback transaction when item creation fails', async () => {
+      // Arrange
+      const mockGroup = {
+        id: 1,
+        event_type: 'led_outage',
+        controller_id: 'AOT1D-25090001',
+        start_time: new Date(baseData.timestamp * 1000),
+        end_time: new Date(baseData.timestamp * 1000)
+      };
+
+      // Mock transaction to execute the callback
+      prisma.$transaction.mockImplementation(async (callback) => {
+        return await callback(prisma);
+      });
+
+      outageGroupRepo.createWithTx.mockResolvedValue(mockGroup);
+      outageItemRepo.createWithTx.mockRejectedValue(new Error('Item creation failed'));
+
+      // Act & Assert
+      await expect(
+        dataProcessService.createNewGroup(baseData.controllerId, baseData.eventType, baseData.timestamp)
+      ).rejects.toThrow('Item creation failed');
+
+      // Verify transaction was called
+      expect(prisma.$transaction).toHaveBeenCalled();
+      // Cache should not be updated due to transaction failure
+      expect(mockRedisClient.setEx).not.toHaveBeenCalled();
+    });
+
+    it('should commit transaction when both group and item creation succeed', async () => {
+      // Arrange
+      const mockGroup = {
+        id: 1,
+        event_type: 'led_outage',
+        controller_id: 'AOT1D-25090001',
+        start_time: new Date(baseData.timestamp * 1000),
+        end_time: new Date(baseData.timestamp * 1000)
+      };
+
+      prisma.$transaction.mockImplementation(async (callback) => {
+        return await callback(prisma);
+      });
+
+      outageGroupRepo.createWithTx.mockResolvedValue(mockGroup);
+      outageItemRepo.createWithTx.mockResolvedValue({
+        id: 1,
+        group_id: 1,
+        occurrence_time: new Date(baseData.timestamp * 1000)
+      });
+
+      // Act
+      const result = await dataProcessService.createNewGroup(
+        baseData.controllerId,
+        baseData.eventType,
+        baseData.timestamp
+      );
+
+      // Assert
+      expect(result).toEqual(mockGroup);
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(outageGroupRepo.createWithTx).toHaveBeenCalled();
+      expect(outageItemRepo.createWithTx).toHaveBeenCalled();
+      expect(mockRedisClient.setEx).toHaveBeenCalled();
+    });
+
+    it('should handle cache failure gracefully after successful transaction', async () => {
+      // Arrange
+      const mockGroup = {
+        id: 1,
+        event_type: 'led_outage',
+        controller_id: 'AOT1D-25090001',
+        start_time: new Date(baseData.timestamp * 1000),
+        end_time: new Date(baseData.timestamp * 1000)
+      };
+
+      prisma.$transaction.mockImplementation(async (callback) => {
+        return await callback(prisma);
+      });
+
+      outageGroupRepo.createWithTx.mockResolvedValue(mockGroup);
+      outageItemRepo.createWithTx.mockResolvedValue({
+        id: 1,
+        group_id: 1,
+        occurrence_time: new Date(baseData.timestamp * 1000)
+      });
+      mockRedisClient.setEx.mockRejectedValue(new Error('Redis connection error'));
+
+      // Act & Assert
+      // Cache failure should propagate the error
+      await expect(
+        dataProcessService.createNewGroup(baseData.controllerId, baseData.eventType, baseData.timestamp)
+      ).rejects.toThrow('Redis connection error');
+
+      // Transaction should have been committed before cache failure
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(outageGroupRepo.createWithTx).toHaveBeenCalled();
+      expect(outageItemRepo.createWithTx).toHaveBeenCalled();
+    });
+  });
+
+  describe('Transaction support - addEventToGroup', () => {
+    const baseGroup = {
+      id: 1,
+      event_type: 'led_outage',
+      controller_id: 'AOT1D-25090001',
+      start_time: new Date('2025-01-01T10:00:00Z'),
+      end_time: new Date('2025-01-01T10:00:00Z')
+    };
+    const timestamp = 1756665796;
+
+    it('should rollback transaction when updateEndTime fails', async () => {
+      // Arrange
+      const mockLastItem = {
+        id: 2,
+        group_id: 1,
+        occurrence_time: new Date(timestamp * 1000)
+      };
+
+      prisma.$transaction.mockImplementation(async (callback) => {
+        return await callback(prisma);
+      });
+
+      outageItemRepo.createWithTx.mockResolvedValue({
+        id: 2,
+        group_id: 1,
+        occurrence_time: new Date(timestamp * 1000)
+      });
+      outageItemRepo.findLastItemByGroupIdWithTx.mockResolvedValue(mockLastItem);
+      outageGroupRepo.updateEndTimeWithTx.mockRejectedValue(new Error('Update failed'));
+
+      // Act & Assert
+      await expect(
+        dataProcessService.addEventToGroup(baseGroup, timestamp)
+      ).rejects.toThrow('Update failed');
+
+      // Verify transaction was called
+      expect(prisma.$transaction).toHaveBeenCalled();
+      // Cache should not be updated due to transaction failure
+      expect(mockRedisClient.setEx).not.toHaveBeenCalled();
+    });
+
+    it('should commit transaction when all operations succeed', async () => {
+      // Arrange
+      const mockLastItem = {
+        id: 2,
+        group_id: 1,
+        occurrence_time: new Date(timestamp * 1000)
+      };
+      const mockUpdatedGroup = {
+        id: 1,
+        end_time: new Date(timestamp * 1000)
+      };
+
+      prisma.$transaction.mockImplementation(async (callback) => {
+        return await callback(prisma);
+      });
+
+      outageItemRepo.createWithTx.mockResolvedValue({
+        id: 2,
+        group_id: 1,
+        occurrence_time: new Date(timestamp * 1000)
+      });
+      outageItemRepo.findLastItemByGroupIdWithTx.mockResolvedValue(mockLastItem);
+      outageGroupRepo.updateEndTimeWithTx.mockResolvedValue(mockUpdatedGroup);
+
+      // Act
+      const result = await dataProcessService.addEventToGroup(baseGroup, timestamp);
+
+      // Assert
+      expect(result).toEqual(mockUpdatedGroup);
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(outageItemRepo.createWithTx).toHaveBeenCalled();
+      expect(outageItemRepo.findLastItemByGroupIdWithTx).toHaveBeenCalled();
+      expect(outageGroupRepo.updateEndTimeWithTx).toHaveBeenCalled();
+      expect(mockRedisClient.setEx).toHaveBeenCalled();
+    });
+
+    it('should rollback when findLastItem returns null after creation', async () => {
+      // Arrange
+      prisma.$transaction.mockImplementation(async (callback) => {
+        return await callback(prisma);
+      });
+
+      outageItemRepo.createWithTx.mockResolvedValue({
+        id: 2,
+        group_id: 1,
+        occurrence_time: new Date(timestamp * 1000)
+      });
+      outageItemRepo.findLastItemByGroupIdWithTx.mockResolvedValue(null);
+
+      // Act & Assert
+      await expect(
+        dataProcessService.addEventToGroup(baseGroup, timestamp)
+      ).rejects.toThrow('Failed to find last item after creation');
+
+      // Verify transaction was called
+      expect(prisma.$transaction).toHaveBeenCalled();
+      // Cache should not be updated
+      expect(mockRedisClient.setEx).not.toHaveBeenCalled();
+    });
+
+    it('should handle cache failure after successful transaction', async () => {
+      // Arrange
+      const mockLastItem = {
+        id: 2,
+        group_id: 1,
+        occurrence_time: new Date(timestamp * 1000)
+      };
+      const mockUpdatedGroup = {
+        id: 1,
+        end_time: new Date(timestamp * 1000)
+      };
+
+      prisma.$transaction.mockImplementation(async (callback) => {
+        return await callback(prisma);
+      });
+
+      outageItemRepo.createWithTx.mockResolvedValue({
+        id: 2,
+        group_id: 1,
+        occurrence_time: new Date(timestamp * 1000)
+      });
+      outageItemRepo.findLastItemByGroupIdWithTx.mockResolvedValue(mockLastItem);
+      outageGroupRepo.updateEndTimeWithTx.mockResolvedValue(mockUpdatedGroup);
+      mockRedisClient.setEx.mockRejectedValue(new Error('Redis error'));
+
+      // Act & Assert
+      await expect(
+        dataProcessService.addEventToGroup(baseGroup, timestamp)
+      ).rejects.toThrow('Redis error');
+
+      // Transaction should have been committed
+      expect(prisma.$transaction).toHaveBeenCalled();
     });
   });
 });

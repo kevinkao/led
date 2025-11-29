@@ -1,6 +1,7 @@
 const { getRedisClient } = require('../lib/redis');
 const outageGroupRepo = require('../repository/outageGroup.repository');
 const outageItemRepo = require('../repository/outageItem.repository');
+const { prisma } = require('../lib/db');
 
 /**
  * DataProcess Service
@@ -41,13 +42,13 @@ const getCachedGroup = async (controllerId, eventType) => {
  * @param {string} controllerId - Controller ID
  * @param {string} eventType - Event type
  * @param {Object} group - Group object to cache
- * @param {number} ttl - TTL in seconds (default: 2 hours)
+ * @param {number} ttl - TTL in seconds (default: 1 hours)
  * @returns {Promise<void>}
  */
-const setCachedGroup = async (controllerId, eventType, group, ttl = 7200) => {
+const setCachedGroup = async (controllerId, eventType, group, ttl = 3600) => {
   const redis = await getRedisClient();
   const cacheKey = generateCacheKey(controllerId, eventType);
-  //   Transform the bigint to string
+
   const groupWithStringId = {
     ...group,
     id: group.id.toString()
@@ -94,21 +95,26 @@ const findMatchingGroup = async (controllerId, eventType, timestamp) => {
  * @returns {Promise<Object>} Created group object
  */
 const createNewGroup = async (controllerId, eventType, timestamp) => {
-  // Create new group with start_time and end_time both set to timestamp
-  const newGroup = await outageGroupRepo.create({
-    eventType,
-    controllerId,
-    startTime: timestamp,
-    endTime: timestamp
+  // Use transaction to ensure atomicity of DB operations
+  const newGroup = await prisma.$transaction(async (tx) => {
+    // Create new group with start_time and end_time both set to timestamp
+    const group = await outageGroupRepo.createWithTx({
+      eventType,
+      controllerId,
+      startTime: timestamp,
+      endTime: timestamp
+    }, tx);
+
+    // Create the first item
+    await outageItemRepo.createWithTx({
+      groupId: group.id,
+      occurrenceTime: timestamp
+    }, tx);
+
+    return group;
   });
 
-  // Create the first item
-  await outageItemRepo.create({
-    groupId: newGroup.id,
-    occurrenceTime: timestamp
-  });
-
-  // Cache the new group
+  // Cache the new group (outside transaction)
   await setCachedGroup(controllerId, eventType, newGroup);
 
   return newGroup;
@@ -121,26 +127,31 @@ const createNewGroup = async (controllerId, eventType, timestamp) => {
  * @returns {Promise<Object>} Updated group object
  */
 const addEventToGroup = async (group, timestamp) => {
-  // Create new item for this event
-  await outageItemRepo.create({
-    groupId: group.id,
-    occurrenceTime: timestamp
+  // Use transaction to ensure atomicity of DB operations
+  const updatedGroup = await prisma.$transaction(async (tx) => {
+    // Create new item for this event
+    await outageItemRepo.createWithTx({
+      groupId: group.id,
+      occurrenceTime: timestamp
+    }, tx);
+
+    // Find the last item to get the latest occurrence_time
+    const lastItem = await outageItemRepo.findLastItemByGroupIdWithTx(group.id, tx);
+
+    if (!lastItem) {
+      throw new Error('Failed to find last item after creation');
+    }
+
+    // Convert occurrence_time to unix timestamp
+    const lastOccurrenceTime = Math.floor(new Date(lastItem.occurrence_time).getTime() / 1000);
+
+    // Update group's end_time to the last item's occurrence_time
+    const updated = await outageGroupRepo.updateEndTimeWithTx(group.id, lastOccurrenceTime, tx);
+
+    return updated;
   });
 
-  // Find the last item to get the latest occurrence_time
-  const lastItem = await outageItemRepo.findLastItemByGroupId(group.id);
-
-  if (!lastItem) {
-    throw new Error('Failed to find last item after creation');
-  }
-
-  // Convert occurrence_time to unix timestamp
-  const lastOccurrenceTime = Math.floor(new Date(lastItem.occurrence_time).getTime() / 1000);
-
-  // Update group's end_time to the last item's occurrence_time
-  const updatedGroup = await outageGroupRepo.updateEndTime(group.id, lastOccurrenceTime);
-
-  // Update cache with new end_time
+  // Update cache with new end_time (outside transaction)
   const groupToCache = {
     ...group,
     end_time: updatedGroup.end_time

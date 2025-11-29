@@ -138,33 +138,6 @@ docker compose exec app bash -c 'cd /workspace/app && npm run migrate:status'
 docker compose exec app bash -c 'cd /workspace/app && npm run migrate:reset'
 ```
 
-### Database Commands
-
-| Command | Description | Usage |
-|---------|-------------|-------|
-| `npm run db:push` | Push schema changes without creating migration | Quick prototyping |
-| `npm run db:pull` | Pull schema from existing database | Reverse engineering |
-| `npm run db:studio` | Open Prisma Studio GUI | Visual database management |
-| `npm run db:generate` | Generate Prisma Client | After schema changes |
-| `npm run db:seed` | Run database seeder | Populate initial data |
-
-#### Database Examples
-
-**Push schema changes directly:**
-```bash
-docker compose exec app bash -c 'cd /workspace/app && npm run db:push'
-```
-
-**Open Prisma Studio:**
-```bash
-docker compose exec app bash -c 'cd /workspace/app && npm run db:studio'
-```
-
-**Generate Prisma Client:**
-```bash
-docker compose exec app bash -c 'cd /workspace/app && npm run db:generate'
-```
-
 ## Database Schema
 
 ### outages_groups
@@ -191,17 +164,10 @@ docker compose exec app bash -c 'cd /workspace/app && npm run db:generate'
 | group_id | BIGINT | Foreign key to outages_groups |
 | occurrence_time | DATETIME | Time of occurrence |
 
-**Indexes:**
-- `idx_group_id` (group_id)
-
-**Foreign Keys:**
-- `group_id` references `outages_groups(id)`
+**Unique Indexes:**
+- `idx_group_id_occurrence_time` (group_id, occurrence_time)
 
 ## Usage
-
-## About Rollback
-
-Prisma does not have a built-in single-step rollback feature. To rollback migrations:
 
 ### Option 1: Manual Rollback
 1. Delete the latest migration file from `prisma/migrations/`

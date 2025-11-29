@@ -33,6 +33,150 @@ app/
 └── .env.example
 ```
 
+## API Documentation
+
+### 1. Process Outage Event
+
+Process and aggregate outage event data. The system automatically groups events that occur within a 5-minute window.
+
+**Endpoint:** `POST /api/v1/data-process`
+
+**Request Body:**
+
+| Field | Type | Required | Description | Validation |
+|-------|------|----------|-------------|------------|
+| `controller_id` | string | Yes | Controller identifier | Non-empty string |
+| `event_type` | string | Yes | Type of outage event | One of: `panel_outage`, `temperature_outage`, `led_outage` |
+| `timestamp` | number | Yes | Event occurrence time | Unix timestamp (seconds) |
+
+**Success Response:**
+
+```json
+{
+  "success": true,
+  "message": "Event processed successfully",
+  "data": {
+    "group_id": 123,
+    "is_new_group": true
+  }
+}
+```
+
+**Example Request:**
+
+```bash
+curl -X POST http://localhost:3000/api/v1/data-process \
+  -H "Content-Type: application/json" \
+  -d '{
+    "controller_id": "CTRL001",
+    "event_type": "panel_outage",
+    "timestamp": 1735603200
+  }'
+```
+
+**Error Responses:**
+
+```json
+{
+  "success": false,
+  "error": "controller_id is required"
+}
+```
+
+```json
+{
+  "success": false,
+  "error": "event_type must be one of: panel_outage, temperature_outage, led_outage"
+}
+```
+
+```json
+{
+  "success": false,
+  "error": "timestamp must be a valid unix timestamp (positive integer)"
+}
+```
+
+### 2. Query Outage Groups
+
+Retrieve outage groups with filtering and pagination support.
+
+**Endpoint:** `GET /api/v1/outages/groups`
+
+**Query Parameters:**
+
+| Field | Type | Required | Description | Validation | Default |
+|-------|------|----------|-------------|------------|---------|
+| `outage_type` | string | Yes | Type of outage event | One of: `panel_outage`, `temperature_outage`, `led_outage` | - |
+| `start_time` | number | Yes | Query start time | Unix timestamp (seconds) | - |
+| `end_time` | number | Yes | Query end time | Unix timestamp (seconds), must be >= `start_time` | - |
+| `controller_id` | string | No | Filter by controller ID | Non-empty string | - |
+| `offset` | number | No | Pagination offset | Non-negative integer | 0 |
+| `limit` | number | No | Number of records to return | Positive integer | 20 |
+
+**Success Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": 123,
+      "outage_type": "panel_outage",
+      "controller_id": "CTRL001",
+      "start_time": "1735603200",
+      "end_time": "1735603500"
+    },
+    {
+      "id": 124,
+      "outage_type": "panel_outage",
+      "controller_id": "CTRL001",
+      "start_time": "1735610000",
+      "end_time": "1735610300"
+    }
+  ],
+  "pagination": {
+    "total": 50,
+    "offset": 0,
+    "limit": 20
+  }
+}
+```
+
+**Example Requests:**
+
+Basic query:
+```bash
+curl -X GET "http://localhost:3000/api/v1/outages/groups?outage_type=panel_outage&start_time=1735603200&end_time=1735689600"
+```
+
+With controller filter and pagination:
+```bash
+curl -X GET "http://localhost:3000/api/v1/outages/groups?outage_type=panel_outage&controller_id=CTRL001&start_time=1735603200&end_time=1735689600&offset=20&limit=10"
+```
+
+**Error Responses:**
+
+```json
+{
+  "success": false,
+  "error": "outage_type is required"
+}
+```
+
+```json
+{
+  "success": false,
+  "error": "start_time cannot be greater than end_time"
+}
+```
+
+```json
+{
+  "success": false,
+  "error": "limit must be a positive integer"
+}
+```
+
 ## Prerequisites
 
 - Docker
@@ -137,35 +281,6 @@ docker compose exec app bash -c 'cd /workspace/app && npm run migrate:status'
 ```bash
 docker compose exec app bash -c 'cd /workspace/app && npm run migrate:reset'
 ```
-
-## Database Schema
-
-### outages_groups
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | BIGINT | Primary key |
-| event_type | VARCHAR(255) | Type of outage event |
-| controller_id | VARCHAR(255) | Controller identifier |
-| start_time | DATETIME | Outage start time |
-| end_time | DATETIME | Outage end time |
-| created_at | DATETIME | Record creation timestamp |
-| updated_at | DATETIME | Record update timestamp |
-
-**Indexes:**
-- `idx_time_event_controller` (start_time, end_time, event_type, controller_id)
-- `idx_event_controller` (controller_id, event_type)
-
-### outages_items
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | BIGINT | Primary key |
-| group_id | BIGINT | Foreign key to outages_groups |
-| occurrence_time | DATETIME | Time of occurrence |
-
-**Unique Indexes:**
-- `idx_group_id_occurrence_time` (group_id, occurrence_time)
 
 ## Usage
 

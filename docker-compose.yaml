@@ -1,0 +1,54 @@
+
+services:
+  app:
+    image: node:24.11.1
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=123456
+      - DB_NAME=develop
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    tty: true
+    depends_on:
+      - mysql
+      - redis
+    restart: unless-stopped
+
+  # MySQL 8
+  mysql:
+    image: mysql:8.4
+    ports:
+      - "3308:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=123456
+      - MYSQL_DATABASE=develop
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+    restart: unless-stopped
+    command: ["mysqld", "--mysql-native-password=ON"]
+
+  # Redis 7
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6374:6379"
+    restart: unless-stopped
+
+  # Nginx
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8035:8035"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - app
+    restart: unless-stopped

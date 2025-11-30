@@ -278,31 +278,25 @@ docker compose exec app bash -c 'cd /workspace/app && npm test'
                         │ (Every 10 minutes when outage persists)
                         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                          Nginx                               │
-│                   (Reverse Proxy Layer)                      │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Express Application                        │
+│                   Express Application                       │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │  Handler Layer (HTTP Request/Response)                 │ │
 │  │   - dataProcess.handler.js                             │ │
 │  │   - outageQuery.handler.js                             │ │
 │  └──────────────┬──────────────────┬──────────────────────┘ │
-│                 │                  │                         │
+│                 │                  │                        │
 │  ┌──────────────▼──────────────────▼──────────────────────┐ │
 │  │  Service Layer (Business Logic)                        │ │
 │  │   - dataProcess.service.js (Event aggregation)         │ │
 │  │   - outageQuery.service.js (Query logic)               │ │
 │  └──────────────┬──────────────────┬──────────────────────┘ │
-│                 │                  │                         │
+│                 │                  │                        │
 │  ┌──────────────▼──────────────────▼──────────────────────┐ │
 │  │  Repository Layer (Data Access)                        │ │
 │  │   - outageGroup.repository.js (Prisma + Raw SQL)       │ │
 │  │   - outageItem.repository.js                           │ │
 │  └──────────────┬──────────────────┬──────────────────────┘ │
-└─────────────────┼──────────────────┼──────────────────────────┘
+└─────────────────┼──────────────────┼────────────────────────┘
                   │                  │
         ┌─────────▼────────┐  ┌─────▼──────┐
         │   Redis Cache    │  │   MySQL 8  │

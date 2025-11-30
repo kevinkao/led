@@ -271,8 +271,8 @@ docker compose exec app bash -c 'cd /workspace/app && npm test'
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    External Controllers                      │
-│            (5000+ controllers, +10% monthly growth)          │
+│                    External Controllers                     │
+│            (5000+ controllers, +10% monthly growth)         │
 └───────────────────────┬─────────────────────────────────────┘
                         │ POST /api/v1/data-process
                         │ (Every 10 minutes when outage persists)

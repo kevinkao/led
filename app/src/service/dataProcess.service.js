@@ -135,26 +135,32 @@ const addEventToGroup = async (group, timestamp) => {
       occurrenceTime: timestamp
     }, tx);
 
-    // Find the last item to get the latest occurrence_time
-    const lastItem = await outageItemRepo.findLastItemByGroupIdWithTx(group.id, tx);
+    // Compare event timestamp with group's time range
+    const eventTime = timestamp * 1000; // Convert to milliseconds
+    const groupStartTime = new Date(group.start_time).getTime();
+    const groupEndTime = new Date(group.end_time).getTime();
 
-    if (!lastItem) {
-      throw new Error('Failed to find last item after creation');
+    let updated;
+
+    if (eventTime < groupStartTime) {
+      // Event is earlier than current start_time, update start_time
+      updated = await outageGroupRepo.updateStartTimeWithTx(group.id, timestamp, tx);
+    } else if (eventTime > groupEndTime) {
+      // Event is later than current end_time, update end_time
+      updated = await outageGroupRepo.updateEndTimeWithTx(group.id, timestamp, tx);
+    } else {
+      // Event is within the current time range, no update needed
+      updated = group;
     }
-
-    // Convert occurrence_time to unix timestamp
-    const lastOccurrenceTime = Math.floor(new Date(lastItem.occurrence_time).getTime() / 1000);
-
-    // Update group's end_time to the last item's occurrence_time
-    const updated = await outageGroupRepo.updateEndTimeWithTx(group.id, lastOccurrenceTime, tx);
 
     return updated;
   });
 
-  // Update cache with new end_time (outside transaction)
+  // Update cache with new time range (outside transaction)
   const groupToCache = {
     ...group,
-    end_time: updatedGroup.end_time
+    ...(updatedGroup.start_time && { start_time: updatedGroup.start_time }),
+    ...(updatedGroup.end_time && { end_time: updatedGroup.end_time })
   };
   await setCachedGroup(group.controller_id, group.event_type, groupToCache);
 

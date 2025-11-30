@@ -482,16 +482,20 @@ describe('DataProcessService', () => {
       expect(mockRedisClient.setEx).not.toHaveBeenCalled();
     });
 
-    it('should commit transaction when all operations succeed', async () => {
+    it('should commit transaction when all operations succeed (event after end_time)', async () => {
       // Arrange
-      const mockLastItem = {
-        id: 2,
-        group_id: 1,
-        occurrence_time: new Date(timestamp * 1000)
+      const group = {
+        id: 1,
+        event_type: 'led_outage',
+        controller_id: 'AOT1D-25090001',
+        start_time: new Date('2025-01-01T10:00:00Z'),
+        end_time: new Date('2025-01-01T10:00:00Z')
       };
+      const laterTimestamp = Math.floor(new Date('2025-01-01T10:30:00Z').getTime() / 1000);
+
       const mockUpdatedGroup = {
         id: 1,
-        end_time: new Date(timestamp * 1000)
+        end_time: new Date(laterTimestamp * 1000)
       };
 
       prisma.$transaction.mockImplementation(async (callback) => {
@@ -501,45 +505,19 @@ describe('DataProcessService', () => {
       outageItemRepo.createWithTx.mockResolvedValue({
         id: 2,
         group_id: 1,
-        occurrence_time: new Date(timestamp * 1000)
+        occurrence_time: new Date(laterTimestamp * 1000)
       });
-      outageItemRepo.findLastItemByGroupIdWithTx.mockResolvedValue(mockLastItem);
       outageGroupRepo.updateEndTimeWithTx.mockResolvedValue(mockUpdatedGroup);
 
       // Act
-      const result = await dataProcessService.addEventToGroup(baseGroup, timestamp);
+      const result = await dataProcessService.addEventToGroup(group, laterTimestamp);
 
       // Assert
       expect(result).toEqual(mockUpdatedGroup);
       expect(prisma.$transaction).toHaveBeenCalled();
       expect(outageItemRepo.createWithTx).toHaveBeenCalled();
-      expect(outageItemRepo.findLastItemByGroupIdWithTx).toHaveBeenCalled();
       expect(outageGroupRepo.updateEndTimeWithTx).toHaveBeenCalled();
       expect(mockRedisClient.setEx).toHaveBeenCalled();
-    });
-
-    it('should rollback when findLastItem returns null after creation', async () => {
-      // Arrange
-      prisma.$transaction.mockImplementation(async (callback) => {
-        return await callback(prisma);
-      });
-
-      outageItemRepo.createWithTx.mockResolvedValue({
-        id: 2,
-        group_id: 1,
-        occurrence_time: new Date(timestamp * 1000)
-      });
-      outageItemRepo.findLastItemByGroupIdWithTx.mockResolvedValue(null);
-
-      // Act & Assert
-      await expect(
-        dataProcessService.addEventToGroup(baseGroup, timestamp)
-      ).rejects.toThrow('Failed to find last item after creation');
-
-      // Verify transaction was called
-      expect(prisma.$transaction).toHaveBeenCalled();
-      // Cache should not be updated
-      expect(mockRedisClient.setEx).not.toHaveBeenCalled();
     });
 
     it('should handle cache failure after successful transaction', async () => {
@@ -574,6 +552,126 @@ describe('DataProcessService', () => {
 
       // Transaction should have been committed
       expect(prisma.$transaction).toHaveBeenCalled();
+    });
+
+    it('should update start_time when event timestamp is earlier than group start_time', async () => {
+      // Arrange
+      const group = {
+        id: 1,
+        event_type: 'led_outage',
+        controller_id: 'AOT1D-25090001',
+        start_time: new Date('2025-01-01T10:00:00Z'), // 10:00:00
+        end_time: new Date('2025-01-01T10:30:00Z')    // 10:30:00
+      };
+      const earlyTimestamp = Math.floor(new Date('2025-01-01T09:30:00Z').getTime() / 1000); // 09:30:00 (earlier)
+
+      const mockUpdatedGroup = {
+        id: 1,
+        start_time: new Date(earlyTimestamp * 1000)
+      };
+
+      prisma.$transaction.mockImplementation(async (callback) => {
+        return await callback(prisma);
+      });
+
+      outageItemRepo.createWithTx.mockResolvedValue({
+        id: 2,
+        group_id: 1,
+        occurrence_time: new Date(earlyTimestamp * 1000)
+      });
+      outageGroupRepo.updateStartTimeWithTx.mockResolvedValue(mockUpdatedGroup);
+
+      // Act
+      const result = await dataProcessService.addEventToGroup(group, earlyTimestamp);
+
+      // Assert
+      expect(result).toEqual(mockUpdatedGroup);
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(outageItemRepo.createWithTx).toHaveBeenCalledWith({
+        groupId: 1,
+        occurrenceTime: earlyTimestamp
+      }, prisma);
+      expect(outageGroupRepo.updateStartTimeWithTx).toHaveBeenCalledWith(1, earlyTimestamp, prisma);
+      expect(outageGroupRepo.updateEndTimeWithTx).not.toHaveBeenCalled();
+      expect(mockRedisClient.setEx).toHaveBeenCalled();
+    });
+
+    it('should update end_time when event timestamp is later than group end_time', async () => {
+      // Arrange
+      const group = {
+        id: 1,
+        event_type: 'led_outage',
+        controller_id: 'AOT1D-25090001',
+        start_time: new Date('2025-01-01T10:00:00Z'), // 10:00:00
+        end_time: new Date('2025-01-01T10:30:00Z')    // 10:30:00
+      };
+      const lateTimestamp = Math.floor(new Date('2025-01-01T11:00:00Z').getTime() / 1000); // 11:00:00 (later)
+
+      const mockUpdatedGroup = {
+        id: 1,
+        end_time: new Date(lateTimestamp * 1000)
+      };
+
+      prisma.$transaction.mockImplementation(async (callback) => {
+        return await callback(prisma);
+      });
+
+      outageItemRepo.createWithTx.mockResolvedValue({
+        id: 2,
+        group_id: 1,
+        occurrence_time: new Date(lateTimestamp * 1000)
+      });
+      outageGroupRepo.updateEndTimeWithTx.mockResolvedValue(mockUpdatedGroup);
+
+      // Act
+      const result = await dataProcessService.addEventToGroup(group, lateTimestamp);
+
+      // Assert
+      expect(result).toEqual(mockUpdatedGroup);
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(outageItemRepo.createWithTx).toHaveBeenCalledWith({
+        groupId: 1,
+        occurrenceTime: lateTimestamp
+      }, prisma);
+      expect(outageGroupRepo.updateEndTimeWithTx).toHaveBeenCalledWith(1, lateTimestamp, prisma);
+      expect(outageGroupRepo.updateStartTimeWithTx).not.toHaveBeenCalled();
+      expect(mockRedisClient.setEx).toHaveBeenCalled();
+    });
+
+    it('should not update time range when event timestamp is within group time range', async () => {
+      // Arrange
+      const group = {
+        id: 1,
+        event_type: 'led_outage',
+        controller_id: 'AOT1D-25090001',
+        start_time: new Date('2025-01-01T10:00:00Z'), // 10:00:00
+        end_time: new Date('2025-01-01T10:30:00Z')    // 10:30:00
+      };
+      const middleTimestamp = Math.floor(new Date('2025-01-01T10:15:00Z').getTime() / 1000); // 10:15:00 (middle)
+
+      prisma.$transaction.mockImplementation(async (callback) => {
+        return await callback(prisma);
+      });
+
+      outageItemRepo.createWithTx.mockResolvedValue({
+        id: 2,
+        group_id: 1,
+        occurrence_time: new Date(middleTimestamp * 1000)
+      });
+
+      // Act
+      const result = await dataProcessService.addEventToGroup(group, middleTimestamp);
+
+      // Assert
+      expect(result).toEqual(group);
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(outageItemRepo.createWithTx).toHaveBeenCalledWith({
+        groupId: 1,
+        occurrenceTime: middleTimestamp
+      }, prisma);
+      expect(outageGroupRepo.updateStartTimeWithTx).not.toHaveBeenCalled();
+      expect(outageGroupRepo.updateEndTimeWithTx).not.toHaveBeenCalled();
+      expect(mockRedisClient.setEx).toHaveBeenCalled();
     });
   });
 });

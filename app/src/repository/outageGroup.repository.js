@@ -152,6 +152,48 @@ const updateEndTimeWithTx = async (groupId, endTime, tx = null) => {
 };
 
 /**
+ * Update start_time of an outage group
+ * @param {number} groupId - Group ID
+ * @param {number} startTime - New start time (unix timestamp in seconds)
+ * @returns {Promise<Object>} Updated group info
+ */
+const updateStartTime = async (groupId, startTime) => {
+  const startDate = new Date(startTime * 1000);
+
+  await prisma.$executeRaw(
+    Prisma.sql`
+      UPDATE outages_groups
+      SET start_time = ${startDate}
+      WHERE id = ${groupId}
+    `
+  );
+
+  return { id: groupId, start_time: startDate };
+};
+
+/**
+ * Update start_time of an outage group with transaction support
+ * @param {number} groupId - Group ID
+ * @param {number} startTime - New start time (unix timestamp in seconds)
+ * @param {Object} [tx] - Optional Prisma transaction client
+ * @returns {Promise<Object>} Updated group info
+ */
+const updateStartTimeWithTx = async (groupId, startTime, tx = null) => {
+  const client = tx || prisma;
+  const startDate = new Date(startTime * 1000);
+
+  await client.$executeRaw(
+    Prisma.sql`
+      UPDATE outages_groups
+      SET start_time = ${startDate}
+      WHERE id = ${groupId}
+    `
+  );
+
+  return { id: groupId, start_time: startDate };
+};
+
+/**
  * Find outage group by ID
  * @param {number} groupId - Group ID
  * @returns {Promise<Object|null>} Group object or null
@@ -221,6 +263,8 @@ module.exports = {
   createWithTx,
   updateEndTime,
   updateEndTimeWithTx,
+  updateStartTime,
+  updateStartTimeWithTx,
   findById,
   findAndCountByQueryCriteria
 };

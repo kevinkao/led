@@ -147,7 +147,6 @@ curl -X GET "http://localhost:3000/api/v1/outages/groups?outage_type=panel_outag
 
 ```bash
 git clone <repository-url>
-cd cirrusled
 ```
 
 ### 2. Setup environment variables

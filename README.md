@@ -365,9 +365,6 @@ const isEventInTimeRange = (group, timestamp) => {
 
 **Rationale**:
 - Controllers report every 10 minutes when an outage persists
-- 60-minute threshold accommodates network delays while preventing unrelated events from merging
-- Reduces storage by approximately 6× (1 group vs 6 individual records per hour)
-- Aligns with business requirement for meaningful outage duration tracking
 
 ---
 
@@ -392,9 +389,9 @@ Incoming Event
 ```
 
 **Performance Impact**:
-- **Step 1 (Redis)**: ~1ms latency, handles 80%+ of events (ongoing outages)
-- **Step 2 (Database)**: ~10ms latency, handles edge cases (cache expired, cold start)
-- **Step 3 (Create)**: ~15ms latency, handles only new outages (~5% of events)
+- **Step 1 (Redis)**: handles 80%+ of events (ongoing outages)
+- **Step 2 (Database)**: handles edge cases (cache expired, cold start)
+- **Step 3 (Create)**: handles only new outages (~5% of events)
 
 **Rationale**:
 - **Redis first**: Most events (80%+) belong to ongoing outages (hot data in cache)

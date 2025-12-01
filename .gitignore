@@ -1,5 +1,6 @@
 .devcontainer
 mysql_data
+nginx
 
 *_task.md
 *.pdf
